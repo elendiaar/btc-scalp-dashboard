@@ -1,33 +1,44 @@
 /* =========================================================
-   BTC Scalp Dashboard — Frontend Application
+   BTC Scalp Dashboard v2 — Frontend Application
+   Order-flow-first architecture with CVD, tape, LOB,
+   absorption, dynamic exits, and WS stream status.
    ========================================================= */
 
 (function () {
   "use strict";
 
   // ── State ──
-  let ws = null;
-  let reconnectTimer = null;
-  let audioEnabled = false;
-  let currentTf = "5m";
-  let priceChart = null;
-  let allSignals = [];
-  let lastData = null;
+  var ws = null;
+  var reconnectTimer = null;
+  var audioEnabled = false;
+  var currentTf = "5m";
+  var priceChart = null;
+  var allSignals = [];
+  var lastData = null;
 
   // ── Audio Context for alerts ──
-  let audioCtx = null;
-  function playAlert() {
+  var audioCtx = null;
+  function playAlert(type) {
     if (!audioEnabled) return;
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
       osc.connect(gain);
       gain.connect(audioCtx.destination);
       osc.type = "sine";
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-      osc.frequency.setValueAtTime(1100, audioCtx.currentTime + 0.1);
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.2);
+
+      if (type === "exit") {
+        // Lower pitch descending tone for exits
+        osc.frequency.setValueAtTime(660, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(440, audioCtx.currentTime + 0.15);
+        osc.frequency.setValueAtTime(330, audioCtx.currentTime + 0.3);
+      } else {
+        // Higher pitch ascending tone for entries
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(1100, audioCtx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.2);
+      }
       gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
       osc.start(audioCtx.currentTime);
@@ -55,8 +66,12 @@
   }
   function fmtTime(iso) {
     if (!iso) return "--";
-    const d = new Date(iso);
+    var d = new Date(iso);
     return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  }
+  function fmtBtc(n) {
+    if (n == null || isNaN(n)) return "--";
+    return Number(n).toFixed(4);
   }
 
   function scoreColor(score) {
@@ -66,94 +81,36 @@
     return "var(--accent-red)";
   }
 
+  function trendColor(trend) {
+    if (trend === "rising" || trend === "buyers" || trend === "buy" || trend === "bullish_absorption" || trend === "bullish") return "var(--accent-green)";
+    if (trend === "falling" || trend === "sellers" || trend === "sell" || trend === "bearish_absorption" || trend === "bearish") return "var(--accent-red)";
+    return "var(--text-muted)";
+  }
+
+  function trendLabel(val) {
+    if (val === "bullish_absorption") return "Bullish";
+    if (val === "bearish_absorption") return "Bearish";
+    if (!val || val === "none" || val === "flat" || val === "balanced" || val === "neutral") return val || "none";
+    return val;
+  }
+
   // ── Chart Setup ──
   function initChart() {
-    const ctx = document.getElementById("priceChart").getContext("2d");
+    var ctx = document.getElementById("priceChart").getContext("2d");
     priceChart = new Chart(ctx, {
       type: "line",
       data: {
         labels: [],
         datasets: [
-          {
-            label: "Price",
-            data: [],
-            borderColor: "#06b6d4",
-            borderWidth: 1.5,
-            pointRadius: 0,
-            pointHoverRadius: 3,
-            fill: false,
-            tension: 0.1,
-            order: 1,
-          },
-          {
-            label: "EMA 9",
-            data: [],
-            borderColor: "#22c55e",
-            borderWidth: 1,
-            pointRadius: 0,
-            borderDash: [],
-            fill: false,
-            order: 2,
-          },
-          {
-            label: "EMA 21",
-            data: [],
-            borderColor: "#f59e0b",
-            borderWidth: 1,
-            pointRadius: 0,
-            fill: false,
-            order: 3,
-          },
-          {
-            label: "EMA 55",
-            data: [],
-            borderColor: "#a78bfa",
-            borderWidth: 1,
-            pointRadius: 0,
-            fill: false,
-            order: 4,
-          },
-          {
-            label: "EMA 200",
-            data: [],
-            borderColor: "#ef4444",
-            borderWidth: 1,
-            pointRadius: 0,
-            borderDash: [4, 4],
-            fill: false,
-            order: 5,
-          },
-          {
-            label: "BB Upper",
-            data: [],
-            borderColor: "rgba(100,116,139,0.4)",
-            borderWidth: 1,
-            pointRadius: 0,
-            borderDash: [2, 2],
-            fill: false,
-            order: 6,
-          },
-          {
-            label: "BB Lower",
-            data: [],
-            borderColor: "rgba(100,116,139,0.4)",
-            borderWidth: 1,
-            pointRadius: 0,
-            borderDash: [2, 2],
-            fill: "-1",
-            backgroundColor: "rgba(100,116,139,0.04)",
-            order: 7,
-          },
-          {
-            label: "VWAP",
-            data: [],
-            borderColor: "rgba(249,115,22,0.6)",
-            borderWidth: 1,
-            pointRadius: 0,
-            borderDash: [6, 3],
-            fill: false,
-            order: 8,
-          },
+          { label: "Price", data: [], borderColor: "#06b6d4", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, fill: false, tension: 0.1, order: 1 },
+          { label: "EMA 9", data: [], borderColor: "#22c55e", borderWidth: 1, pointRadius: 0, fill: false, order: 2 },
+          { label: "EMA 21", data: [], borderColor: "#f59e0b", borderWidth: 1, pointRadius: 0, fill: false, order: 3 },
+          { label: "EMA 55", data: [], borderColor: "#a78bfa", borderWidth: 1, pointRadius: 0, fill: false, order: 4 },
+          { label: "EMA 200", data: [], borderColor: "#ef4444", borderWidth: 1, pointRadius: 0, borderDash: [4, 4], fill: false, order: 5 },
+          { label: "BB Upper", data: [], borderColor: "rgba(100,116,139,0.4)", borderWidth: 1, pointRadius: 0, borderDash: [2, 2], fill: false, order: 6 },
+          { label: "BB Lower", data: [], borderColor: "rgba(100,116,139,0.4)", borderWidth: 1, pointRadius: 0, borderDash: [2, 2], fill: "-1", backgroundColor: "rgba(100,116,139,0.04)", order: 7 },
+          { label: "VWAP", data: [], borderColor: "rgba(249,115,22,0.6)", borderWidth: 1, pointRadius: 0, borderDash: [6, 3], fill: false, order: 8 },
+          { label: "POC", data: [], borderColor: "rgba(167,139,250,0.5)", borderWidth: 1.5, pointRadius: 0, borderDash: [8, 4], fill: false, order: 9 },
         ],
       },
       options: {
@@ -202,44 +159,27 @@
 
   function updateChart(data) {
     if (!priceChart || !data) return;
-    const candles = currentTf === "1m" ? data.candles_1m : data.candles_5m;
+    var candles = currentTf === "1m" ? data.candles_1m : data.candles_5m;
     if (!candles || candles.length === 0) return;
 
-    const labels = candles.map(function (c) { return new Date(c.t); });
-    const closes = candles.map(function (c) { return c.c; });
+    var labels = candles.map(function (c) { return new Date(c.t); });
+    var closes = candles.map(function (c) { return c.c; });
 
     priceChart.data.labels = labels;
     priceChart.data.datasets[0].data = closes;
 
-    // EMAs — align to end of closes array
-    var ta = data.ta || {};
-    var emaValues = ta.emas || {};
+    // Client-side EMA recalculation for smooth visualization
     var emaPeriods = [9, 21, 55, 200];
     for (var ei = 0; ei < emaPeriods.length; ei++) {
-      var period = emaPeriods[ei];
-      var emaVal = emaValues[period];
-      if (emaVal != null && closes.length > 0) {
-        // Show as flat line at current value (simplified — full array would need recalc)
-        var arr = new Array(closes.length).fill(null);
-        // Fill from period onwards with interpolated value
-        var startIdx = Math.max(0, closes.length - 60);
-        for (var j = startIdx; j < closes.length; j++) {
-          arr[j] = emaVal;
-        }
-        priceChart.data.datasets[ei + 1].data = arr;
+      var p = emaPeriods[ei];
+      if (closes.length >= p) {
+        priceChart.data.datasets[ei + 1].data = calcEmaArray(closes, p);
       }
     }
 
-    // Recalculate EMAs client-side for proper visualization
-    for (var ei2 = 0; ei2 < emaPeriods.length; ei2++) {
-      var p2 = emaPeriods[ei2];
-      if (closes.length >= p2) {
-        var emaArr = calcEmaArray(closes, p2);
-        priceChart.data.datasets[ei2 + 1].data = emaArr;
-      }
-    }
+    var ta = data.ta || {};
 
-    // BB
+    // Bollinger Bands
     if (ta.bb) {
       var bbU = new Array(closes.length).fill(null);
       var bbL = new Array(closes.length).fill(null);
@@ -258,6 +198,15 @@
         vwapArr[vi] = ta.vwap;
       }
       priceChart.data.datasets[7].data = vwapArr;
+    }
+
+    // POC (Point of Control)
+    if (ta.poc_price && ta.poc_price > 0) {
+      var pocArr = new Array(closes.length).fill(null);
+      for (var pi = Math.max(0, closes.length - 50); pi < closes.length; pi++) {
+        pocArr[pi] = ta.poc_price;
+      }
+      priceChart.data.datasets[8].data = pocArr;
     }
 
     // Fibonacci annotations
@@ -285,6 +234,25 @@
         };
       }
     }
+
+    // HVN/LVN annotations
+    if (ta.hvn_levels && ta.hvn_levels.length > 0) {
+      for (var hi = 0; hi < Math.min(ta.hvn_levels.length, 3); hi++) {
+        annotations["hvn_" + hi] = {
+          type: "line", yMin: ta.hvn_levels[hi], yMax: ta.hvn_levels[hi],
+          borderColor: "rgba(34,197,94,0.25)", borderWidth: 1.5, borderDash: [4, 4],
+        };
+      }
+    }
+    if (ta.lvn_levels && ta.lvn_levels.length > 0) {
+      for (var li = 0; li < Math.min(ta.lvn_levels.length, 3); li++) {
+        annotations["lvn_" + li] = {
+          type: "line", yMin: ta.lvn_levels[li], yMax: ta.lvn_levels[li],
+          borderColor: "rgba(239,68,68,0.25)", borderWidth: 1.5, borderDash: [4, 4],
+        };
+      }
+    }
+
     priceChart.options.plugins.annotation.annotations = annotations;
     priceChart.update("none");
   }
@@ -307,8 +275,7 @@
   // ── UI Update Functions ──
   function updateHeader(data) {
     var market = data.market || {};
-    var el = document.getElementById("price-value");
-    el.textContent = fmtUsd(market.price);
+    document.getElementById("price-value").textContent = fmtUsd(market.price);
 
     var chgEl = document.getElementById("price-change");
     var pct = market.change_24h_pct || 0;
@@ -327,6 +294,18 @@
     dirEl.className = "gauge-direction " + dir;
   }
 
+  function updateWsStatus(data) {
+    var status = data.ws_status || {};
+    var ids = { "trades": "ws-trades", "depth": "ws-depth", "kline_1m": "ws-kline1m", "kline_5m": "ws-kline5m" };
+    var keys = Object.keys(ids);
+    for (var i = 0; i < keys.length; i++) {
+      var el = document.getElementById(ids[keys[i]]);
+      if (el) {
+        el.className = "ws-indicator " + (status[keys[i]] ? "on" : "off");
+      }
+    }
+  }
+
   function updateBanner(data) {
     var ta = data.ta || {};
     var cond = ta.market_condition || "Ranging";
@@ -339,14 +318,14 @@
     banner.className = "market-banner " + cond.toLowerCase();
 
     if (cond === "Choppy") {
-      iconEl.textContent = "⚠";
-      extraEl.textContent = " — All signals suppressed. ADX: " + fmt(ta.adx, 1) + ", BB Width: " + fmt(ta.bb ? ta.bb.width : 0, 2);
+      iconEl.textContent = "\u26A0";
+      extraEl.textContent = " \u2014 All signals suppressed. ADX: " + fmt(ta.adx, 1) + ", BB Width: " + fmt(ta.bb ? ta.bb.width : 0, 2);
     } else if (cond === "Trending") {
-      iconEl.textContent = "▲";
-      extraEl.textContent = " — ADX: " + fmt(ta.adx, 1);
+      iconEl.textContent = "\u25B2";
+      extraEl.textContent = " \u2014 ADX: " + fmt(ta.adx, 1);
     } else {
-      iconEl.textContent = "◆";
-      extraEl.textContent = " — ADX: " + fmt(ta.adx, 1);
+      iconEl.textContent = "\u25C6";
+      extraEl.textContent = " \u2014 ADX: " + fmt(ta.adx, 1);
     }
   }
 
@@ -355,6 +334,8 @@
     document.getElementById("toolbar-rsi").textContent = fmt(ta.rsi, 1);
     document.getElementById("toolbar-macd").textContent = ta.macd ? fmt(ta.macd.histogram, 2) : "--";
     document.getElementById("toolbar-adx").textContent = fmt(ta.adx, 1);
+    document.getElementById("toolbar-atr").textContent = fmtUsd(ta.atr);
+
     // Color RSI
     var rsiEl = document.getElementById("toolbar-rsi");
     var rsi = ta.rsi || 50;
@@ -363,17 +344,131 @@
     else rsiEl.style.color = "var(--text-primary)";
   }
 
+  // ── Order Flow Panel ──
+  function updateOrderFlow(data) {
+    var of = data.orderflow || {};
+    var ob = data.orderbook || {};
+
+    // CVD
+    var cvdEl = document.getElementById("of-cvd");
+    cvdEl.textContent = fmtBtc(of.cvd_value);
+    cvdEl.style.color = trendColor(of.cvd_trend);
+
+    var cvdTrendEl = document.getElementById("of-cvd-trend");
+    cvdTrendEl.textContent = trendLabel(of.cvd_trend);
+    cvdTrendEl.style.color = trendColor(of.cvd_trend);
+
+    // LOB
+    var lobEl = document.getElementById("of-lob");
+    lobEl.textContent = fmt(of.lob_ratio, 2);
+    lobEl.style.color = of.lob_ratio > 1.2 ? "var(--accent-green)" : of.lob_ratio < 0.8 ? "var(--accent-red)" : "var(--text-primary)";
+
+    var lobImbEl = document.getElementById("of-lob-imb");
+    var imbPct = (of.lob_imbalance_ema || 0) * 100;
+    lobImbEl.textContent = (imbPct >= 0 ? "+" : "") + fmt(imbPct, 1) + "%";
+    lobImbEl.style.color = imbPct > 5 ? "var(--accent-green)" : imbPct < -5 ? "var(--accent-red)" : "var(--text-muted)";
+
+    // Tape
+    var tapeEl = document.getElementById("of-tape");
+    tapeEl.textContent = trendLabel(of.tape_aggression);
+    tapeEl.style.color = trendColor(of.tape_aggression);
+
+    // Absorption
+    var absEl = document.getElementById("of-absorption");
+    absEl.textContent = trendLabel(of.absorption_signal);
+    absEl.style.color = trendColor(of.absorption_signal);
+
+    // Spread
+    document.getElementById("of-spread").textContent = fmtUsd(of.spread);
+    document.getElementById("of-spread-pct").textContent = fmt(of.spread_pct, 3) + "%";
+
+    // CVD Divergence
+    var divEl = document.getElementById("of-cvd-div");
+    divEl.textContent = trendLabel(of.cvd_divergence);
+    divEl.style.color = trendColor(of.cvd_divergence);
+
+    // Buy/Sell volume bar
+    var buyVol = of.recent_buy_volume || 0;
+    var sellVol = of.recent_sell_volume || 0;
+    var totalVol = buyVol + sellVol;
+    var buyPct = totalVol > 0 ? (buyVol / totalVol * 100) : 50;
+
+    document.getElementById("of-buy-vol").textContent = fmtBtc(buyVol);
+    document.getElementById("of-sell-vol").textContent = fmtBtc(sellVol);
+    document.getElementById("of-vol-buy-bar").style.width = buyPct + "%";
+    document.getElementById("of-vol-sell-bar").style.width = (100 - buyPct) + "%";
+
+    // Order Book delta bar
+    var bidVol = ob.bid_volume || 0;
+    var askVol = ob.ask_volume || 0;
+    var obTotal = bidVol + askVol;
+    var obBidPct = obTotal > 0 ? (bidVol / obTotal * 100) : 50;
+    var obAskPct = 100 - obBidPct;
+
+    document.getElementById("ob-bid-bar").style.width = obBidPct + "%";
+    document.getElementById("ob-bid-bar").textContent = "Bids " + fmt(obBidPct, 0) + "%";
+    document.getElementById("ob-ask-bar").style.width = obAskPct + "%";
+    document.getElementById("ob-ask-bar").textContent = "Asks " + fmt(obAskPct, 0) + "%";
+
+    var delta = ob.delta || 0;
+    var deltaEl = document.getElementById("ob-delta-val");
+    deltaEl.textContent = fmt(delta, 4);
+    deltaEl.style.color = delta > 0 ? "var(--accent-green)" : delta < 0 ? "var(--accent-red)" : "var(--text-muted)";
+  }
+
+  // ── Active Position Banner ──
+  function updateActivePosition(data) {
+    var signal = data.signal;
+    var exitSig = data.exit_signal;
+    var posEl = document.getElementById("active-position");
+
+    // If there's an active entry signal and no exit, show it
+    if (signal && signal.type && signal.type.startsWith("ENTER_") && !exitSig) {
+      posEl.classList.remove("hidden");
+      var dirEl = document.getElementById("active-pos-dir");
+      dirEl.textContent = signal.direction;
+      dirEl.className = "active-pos-dir " + signal.direction;
+
+      var price = (data.market || {}).price || 0;
+      var pnl = signal.direction === "LONG" ? price - signal.entry : signal.entry - price;
+      var pnlPct = signal.entry > 0 ? (pnl / signal.entry * 100) : 0;
+
+      var pnlEl = document.getElementById("active-pos-pnl");
+      pnlEl.textContent = (pnl >= 0 ? "+" : "") + fmtUsd(pnl) + " (" + fmt(pnlPct, 2) + "%)";
+      pnlEl.style.color = pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)";
+
+      document.getElementById("active-pos-entry").textContent = fmtUsd(signal.entry);
+      document.getElementById("active-pos-sl").textContent = fmtUsd(signal.stop_loss);
+      document.getElementById("active-pos-tp").textContent = fmtUsd(signal.tp1);
+    } else {
+      posEl.classList.add("hidden");
+    }
+  }
+
+  // ── Signal Feed ──
   function updateSignalFeed(data) {
     var signal = data.signal;
+    var exitSig = data.exit_signal;
+
+    // Process entry signals
     if (signal && signal.id) {
-      // Check if already in list
       var exists = allSignals.some(function (s) { return s.id === signal.id; });
       if (!exists) {
         allSignals.unshift(signal);
         if (allSignals.length > 50) allSignals.pop();
         if (signal.confidence === "High") {
-          playAlert();
+          playAlert("entry");
         }
+      }
+    }
+
+    // Process exit signals
+    if (exitSig && exitSig.id) {
+      var exitExists = allSignals.some(function (s) { return s.id === exitSig.id; });
+      if (!exitExists) {
+        allSignals.unshift(exitSig);
+        if (allSignals.length > 50) allSignals.pop();
+        playAlert("exit");
       }
     }
 
@@ -390,17 +485,27 @@
     var displaySignals = allSignals.slice(0, 15);
     for (var i = 0; i < displaySignals.length; i++) {
       var s = displaySignals[i];
-      html += renderSignalCard(s);
+      if (s.type === "EXIT") {
+        html += renderExitCard(s);
+      } else {
+        html += renderSignalCard(s);
+      }
     }
     feed.innerHTML = html;
   }
 
   function renderSignalCard(s) {
     var tierClass = s.confidence === "High" ? "high" : "medium";
+    var typeClass = s.direction === "LONG" ? "enter-long" : "enter-short";
     var h = '<div class="signal-card ' + tierClass + '">';
     h += '<div class="signal-header">';
-    h += '<span class="signal-dir ' + s.direction + '">' + s.direction + '</span>';
-    h += '<span class="signal-confidence">' + s.confidence + ' Confidence</span>';
+    h += '<div>';
+    h += '<span class="signal-type ' + typeClass + '">' + (s.type || "ENTER_" + s.direction) + '</span>';
+    if (s.of_confirms) {
+      h += '<span class="signal-of-badge">OF:' + s.of_confirms + '</span>';
+    }
+    h += '</div>';
+    h += '<span class="signal-confidence">' + s.confidence + '</span>';
     h += '</div>';
     h += '<div class="signal-score-mini" style="color:' + scoreColor(s.score) + '">' + fmt(s.score, 0) + '</div>';
 
@@ -411,17 +516,23 @@
     h += '<div class="signal-level"><div class="signal-level-label">TP1 (' + fmt(s.risk_reward, 1) + 'R)</div><div class="signal-level-value tp">' + fmtUsd(s.tp1) + '</div></div>';
     h += '</div>';
 
-    // Breakdown bars
+    // Estimated cost
+    if (s.estimated_cost) {
+      h += '<div style="font-size:10px;color:var(--text-faint);margin-bottom:4px">Est. cost: ' + fmtUsd(s.estimated_cost) + ' | ATR: ' + fmtUsd(s.atr) + '</div>';
+    }
+
+    // Breakdown bars (v2 categories)
     if (s.breakdown) {
       h += '<div class="signal-breakdown">';
-      var cats = ["technical", "orderflow", "onchain", "sentiment", "macro"];
-      var catLabels = { technical: "Technical", orderflow: "Flow", onchain: "On-Chain", sentiment: "Sentiment", macro: "Macro" };
+      var cats = ["orderflow", "technical", "derivatives", "sentiment", "macro"];
+      var catLabels = { orderflow: "Flow", technical: "Tech", derivatives: "Deriv", sentiment: "Sent", macro: "Macro" };
       for (var ci = 0; ci < cats.length; ci++) {
         var cat = cats[ci];
         var bd = s.breakdown[cat] || {};
         var sc = bd.score || 50;
+        var wt = bd.weight ? " (" + (bd.weight * 100).toFixed(0) + "%)" : "";
         h += '<div class="breakdown-row">';
-        h += '<span class="breakdown-label">' + catLabels[cat] + '</span>';
+        h += '<span class="breakdown-label">' + catLabels[cat] + wt + '</span>';
         h += '<div class="breakdown-bar"><div class="breakdown-fill" style="width:' + sc + '%;background:' + scoreColor(sc) + '"></div></div>';
         h += '<span class="breakdown-val">' + fmt(sc, 0) + '</span>';
         h += '</div>';
@@ -442,7 +553,41 @@
       h += '</div>';
     }
 
-    h += '<div class="signal-time">' + fmtTime(s.timestamp) + ' UTC | ' + s.market_condition + '</div>';
+    h += '<div class="signal-time">' + fmtTime(s.timestamp) + ' UTC | ' + (s.market_condition || "--") + '</div>';
+    h += '</div>';
+    return h;
+  }
+
+  function renderExitCard(s) {
+    var h = '<div class="signal-card exit">';
+    h += '<div class="signal-header">';
+    h += '<span class="signal-type exit-signal">EXIT</span>';
+    h += '<span class="signal-confidence">' + s.direction + '</span>';
+    h += '</div>';
+
+    // PnL
+    h += '<div class="signal-pnl">';
+    h += '<span class="signal-pnl-label">PnL:</span>';
+    var pnlColor = (s.pnl || 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)";
+    h += '<span class="signal-pnl-value" style="color:' + pnlColor + '">' + (s.pnl >= 0 ? "+" : "") + fmtUsd(s.pnl) + ' (' + fmt(s.pnl_pct, 2) + '%)</span>';
+    h += '</div>';
+
+    // Entry/Exit prices
+    h += '<div class="signal-levels" style="grid-template-columns:1fr 1fr">';
+    h += '<div class="signal-level"><div class="signal-level-label">Entry</div><div class="signal-level-value entry">' + fmtUsd(s.entry_price) + '</div></div>';
+    h += '<div class="signal-level"><div class="signal-level-label">Exit</div><div class="signal-level-value" style="color:' + pnlColor + '">' + fmtUsd(s.exit_price) + '</div></div>';
+    h += '</div>';
+
+    // Exit reasons
+    if (s.reasons && s.reasons.length > 0) {
+      h += '<div class="signal-reasons">';
+      for (var ri = 0; ri < s.reasons.length; ri++) {
+        h += '<div class="reason-item">' + escHtml(s.reasons[ri]) + '</div>';
+      }
+      h += '</div>';
+    }
+
+    h += '<div class="signal-time">' + fmtTime(s.timestamp) + ' UTC</div>';
     h += '</div>';
     return h;
   }
@@ -451,13 +596,11 @@
     var fg = (data.sentiment || {}).fear_greed || {};
     var val = fg.value || 50;
     var cls = fg.classification || "Neutral";
-    var prev = fg.prev_value || val;
 
     document.getElementById("fg-value").textContent = val;
     document.getElementById("fg-label").textContent = cls;
 
-    var trend = val > prev ? "↑ Rising" : val < prev ? "↓ Falling" : "→ Stable";
-    document.getElementById("fg-trend").textContent = "24h trend: " + trend;
+    document.getElementById("fg-trend").textContent = "24h: " + cls;
 
     // SVG arc
     var arc = document.getElementById("fg-arc");
@@ -490,45 +633,6 @@
     var liqs = oc.liquidations || {};
     document.getElementById("m-liq-long").textContent = "$" + fmtCompact(liqs.long || 0);
     document.getElementById("m-liq-short").textContent = "$" + fmtCompact(liqs.short || 0);
-  }
-
-  function updateOrderbook(data) {
-    var ob = data.orderbook || {};
-    var bidVol = ob.bid_volume || 0;
-    var askVol = ob.ask_volume || 0;
-    var total = bidVol + askVol;
-    var bidPct = total > 0 ? (bidVol / total * 100) : 50;
-    var askPct = 100 - bidPct;
-
-    document.getElementById("ob-bid-bar").style.width = bidPct + "%";
-    document.getElementById("ob-bid-bar").textContent = "Bids " + fmt(bidPct, 0) + "%";
-    document.getElementById("ob-ask-bar").style.width = askPct + "%";
-    document.getElementById("ob-ask-bar").textContent = "Asks " + fmt(askPct, 0) + "%";
-
-    var delta = ob.delta || 0;
-    var deltaEl = document.getElementById("ob-delta-val");
-    deltaEl.textContent = fmt(delta, 4);
-    deltaEl.style.color = delta > 0 ? "var(--accent-green)" : delta < 0 ? "var(--accent-red)" : "var(--text-muted)";
-
-    // Top levels — compact table
-    var levelsHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px;font-size:10px;font-family:var(--font-mono)">';
-    var bids = (ob.bids || []).slice(0, 4);
-    var asks = (ob.asks || []).slice(0, 4);
-
-    levelsHtml += '<div style="color:var(--text-muted);font-weight:600;padding:2px 0">Ask</div>';
-    levelsHtml += '<div style="color:var(--text-muted);font-weight:600;padding:2px 0;text-align:right">Size</div>';
-    for (var ai = asks.length - 1; ai >= 0; ai--) {
-      levelsHtml += '<div style="color:var(--accent-red)">' + fmtUsd(asks[ai][0]) + '</div>';
-      levelsHtml += '<div style="text-align:right;color:var(--text-secondary)">' + fmt(asks[ai][1], 4) + '</div>';
-    }
-    levelsHtml += '<div style="color:var(--text-muted);font-weight:600;padding:2px 0;border-top:1px solid var(--border)">Bid</div>';
-    levelsHtml += '<div style="color:var(--text-muted);font-weight:600;padding:2px 0;text-align:right;border-top:1px solid var(--border)">Size</div>';
-    for (var bi = 0; bi < bids.length; bi++) {
-      levelsHtml += '<div style="color:var(--accent-green)">' + fmtUsd(bids[bi][0]) + '</div>';
-      levelsHtml += '<div style="text-align:right;color:var(--text-secondary)">' + fmt(bids[bi][1], 4) + '</div>';
-    }
-    levelsHtml += '</div>';
-    document.getElementById("ob-levels").innerHTML = levelsHtml;
   }
 
   function updateMacro(data) {
@@ -574,13 +678,15 @@
         if (data.type === "update") {
           lastData = data;
           updateHeader(data);
+          updateWsStatus(data);
           updateBanner(data);
           updateToolbar(data);
           updateChart(data);
+          updateOrderFlow(data);
+          updateActivePosition(data);
           updateSignalFeed(data);
           updateFearGreed(data);
           updateOnchain(data);
-          updateOrderbook(data);
           updateMacro(data);
         } else if (data.type === "settings_updated") {
           populateSettings(data.settings);
@@ -593,6 +699,11 @@
     ws.onclose = function () {
       document.getElementById("conn-dot").className = "conn-dot disconnected";
       document.getElementById("conn-text").textContent = "Reconnecting...";
+      // Reset WS indicators
+      var indicators = document.querySelectorAll(".ws-indicator");
+      for (var i = 0; i < indicators.length; i++) {
+        indicators[i].className = "ws-indicator off";
+      }
       reconnectTimer = setTimeout(connect, 3000);
     };
 
@@ -605,11 +716,12 @@
   function populateSettings(s) {
     if (!s) return;
     var w = s.confluence_weights || {};
-    document.getElementById("s-w-tech").value = w.technical || 0.4;
-    document.getElementById("s-w-flow").value = w.orderflow || 0.2;
-    document.getElementById("s-w-chain").value = w.onchain || 0.15;
-    document.getElementById("s-w-sent").value = w.sentiment || 0.15;
-    document.getElementById("s-w-macro").value = w.macro || 0.1;
+    document.getElementById("s-w-flow").value = w.orderflow || 0.45;
+    document.getElementById("s-w-tech").value = w.technical || 0.20;
+    document.getElementById("s-w-deriv").value = w.derivatives || 0.15;
+    document.getElementById("s-w-sent").value = w.sentiment || 0.05;
+    document.getElementById("s-w-macro").value = w.macro || 0.15;
+    updateWeightSum();
     document.getElementById("s-rsi-period").value = s.rsi_period || 14;
     document.getElementById("s-rsi-ob").value = s.rsi_overbought || 70;
     document.getElementById("s-rsi-os").value = s.rsi_oversold || 30;
@@ -623,14 +735,27 @@
     document.getElementById("s-conf-exit").value = s.emergency_exit || 40;
     document.getElementById("s-rr1").value = s.rr_primary || 2;
     document.getElementById("s-rr2").value = s.rr_secondary || 3;
+    document.getElementById("s-fee").value = s.fee_rate || 0.001;
+    document.getElementById("s-slip").value = s.slippage_rate || 0.0005;
+  }
+
+  function updateWeightSum() {
+    var sum = parseFloat(document.getElementById("s-w-flow").value || 0)
+      + parseFloat(document.getElementById("s-w-tech").value || 0)
+      + parseFloat(document.getElementById("s-w-deriv").value || 0)
+      + parseFloat(document.getElementById("s-w-sent").value || 0)
+      + parseFloat(document.getElementById("s-w-macro").value || 0);
+    var el = document.getElementById("s-w-sum");
+    el.textContent = sum.toFixed(2);
+    el.style.color = Math.abs(sum - 1.0) < 0.01 ? "var(--accent-green)" : "var(--accent-red)";
   }
 
   function saveSettings() {
     var newSettings = {
       confluence_weights: {
-        technical: parseFloat(document.getElementById("s-w-tech").value),
         orderflow: parseFloat(document.getElementById("s-w-flow").value),
-        onchain: parseFloat(document.getElementById("s-w-chain").value),
+        technical: parseFloat(document.getElementById("s-w-tech").value),
+        derivatives: parseFloat(document.getElementById("s-w-deriv").value),
         sentiment: parseFloat(document.getElementById("s-w-sent").value),
         macro: parseFloat(document.getElementById("s-w-macro").value),
       },
@@ -648,6 +773,8 @@
       emergency_exit: parseInt(document.getElementById("s-conf-exit").value),
       rr_primary: parseFloat(document.getElementById("s-rr1").value),
       rr_secondary: parseFloat(document.getElementById("s-rr2").value),
+      fee_rate: parseFloat(document.getElementById("s-fee").value),
+      slippage_rate: parseFloat(document.getElementById("s-slip").value),
     };
 
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -665,22 +792,25 @@
         var html = "";
         for (var i = signals.length - 1; i >= 0; i--) {
           var s = signals[i];
+          var isExit = s.type === "EXIT";
           var dirClass = s.direction === "LONG" ? "text-green" : "text-red";
           html += "<tr>";
           html += "<td>" + fmtTime(s.timestamp) + "</td>";
+          html += '<td class="' + (isExit ? "text-purple" : "text-teal") + '">' + (s.type || "ENTRY") + "</td>";
           html += '<td class="' + dirClass + '">' + s.direction + "</td>";
           html += "<td>" + fmt(s.score, 0) + "</td>";
-          html += "<td>" + s.confidence + "</td>";
-          html += "<td>" + fmtUsd(s.entry) + "</td>";
-          html += "<td>" + fmtUsd(s.stop_loss) + "</td>";
-          html += "<td>" + fmtUsd(s.tp1) + "</td>";
-          html += "<td>" + s.market_condition + "</td>";
+          html += "<td>" + (s.confidence || "--") + "</td>";
+          html += "<td>" + fmtUsd(s.entry || s.entry_price) + "</td>";
+          html += "<td>" + fmtUsd(s.stop_loss || s.exit_price) + "</td>";
+          html += "<td>" + (isExit ? fmtUsd(s.pnl) : fmtUsd(s.tp1)) + "</td>";
+          html += "<td>" + (s.of_confirms || "--") + "</td>";
+          html += "<td>" + (s.market_condition || "--") + "</td>";
           html += "</tr>";
         }
-        tbody.innerHTML = html || '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">No signals logged yet</td></tr>';
+        tbody.innerHTML = html || '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px">No signals logged yet</td></tr>';
       })
       .catch(function () {
-        document.getElementById("log-tbody").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted)">Error loading log</td></tr>';
+        document.getElementById("log-tbody").innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted)">Error loading log</td></tr>';
       });
   }
 
@@ -701,9 +831,8 @@
       audioEnabled = !audioEnabled;
       this.classList.toggle("active", audioEnabled);
       if (audioEnabled) {
-        // Initialize audio context on user gesture
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        playAlert(); // test beep
+        playAlert("entry"); // test beep
       }
     });
 
@@ -716,6 +845,11 @@
       document.getElementById("settings-modal").classList.remove("open");
     });
     document.getElementById("save-settings").addEventListener("click", saveSettings);
+
+    // Weight sum live update
+    ["s-w-flow", "s-w-tech", "s-w-deriv", "s-w-sent", "s-w-macro"].forEach(function (id) {
+      document.getElementById(id).addEventListener("input", updateWeightSum);
+    });
 
     // Log
     document.getElementById("btn-log").addEventListener("click", function () {

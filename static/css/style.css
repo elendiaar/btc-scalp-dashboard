@@ -1,5 +1,5 @@
 /* =========================================================
-   BTC Scalp Dashboard — Dark Theme
+   BTC Scalp Dashboard v2 — Dark Theme
    ========================================================= */
 
 :root {
@@ -101,7 +101,7 @@ html, body {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 1px;
-  max-height: 240px;
+  max-height: 260px;
   overflow: hidden;
 }
 
@@ -116,6 +116,15 @@ html, body {
   white-space: nowrap;
 }
 .logo svg { width: 26px; height: 26px; }
+.version-tag {
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--accent-teal-dim);
+  color: var(--accent-teal);
+  padding: 1px 5px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
 
 .price-block {
   display: flex;
@@ -136,6 +145,33 @@ html, body {
 }
 .price-change.positive { color: var(--accent-green); }
 .price-change.negative { color: var(--accent-red); }
+
+/* WebSocket status group */
+.ws-status-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.ws-stream-indicators {
+  display: flex;
+  gap: 3px;
+  margin-left: 6px;
+}
+.ws-indicator {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(100,116,139,0.15);
+  color: var(--text-faint);
+}
+.ws-indicator.on {
+  background: var(--accent-green-dim);
+  color: var(--accent-green);
+}
 
 .confluence-gauge {
   margin-left: auto;
@@ -234,6 +270,41 @@ html, body {
   z-index: 5;
 }
 
+/* Active position banner */
+.active-position {
+  margin: 8px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--accent-teal);
+  border-radius: var(--radius-md);
+}
+.active-position.hidden { display: none; }
+.active-pos-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.active-pos-dir {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.active-pos-dir.LONG { background: var(--accent-green-dim); color: var(--accent-green); }
+.active-pos-dir.SHORT { background: var(--accent-red-dim); color: var(--accent-red); }
+.active-pos-pnl {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+.active-pos-details {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 .signal-card {
   margin: 8px;
   padding: 12px;
@@ -245,6 +316,7 @@ html, body {
 .signal-card:hover { border-color: var(--border-light); }
 .signal-card.high { border-left: 3px solid var(--accent-green); }
 .signal-card.medium { border-left: 3px solid var(--accent-yellow); }
+.signal-card.exit { border-left: 3px solid var(--accent-purple); background: rgba(167,139,250,0.05); }
 
 .signal-header {
   display: flex;
@@ -252,6 +324,18 @@ html, body {
   justify-content: space-between;
   margin-bottom: 8px;
 }
+.signal-type {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+.signal-type.enter-long { background: var(--accent-green-dim); color: var(--accent-green); }
+.signal-type.enter-short { background: var(--accent-red-dim); color: var(--accent-red); }
+.signal-type.exit-signal { background: rgba(167,139,250,0.15); color: var(--accent-purple); }
+
 .signal-dir {
   font-size: 13px;
   font-weight: 800;
@@ -272,6 +356,15 @@ html, body {
   font-size: 18px;
   font-weight: 700;
   margin-bottom: 6px;
+}
+.signal-of-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-teal);
+  background: var(--accent-teal-dim);
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 8px;
 }
 
 .signal-levels {
@@ -301,6 +394,22 @@ html, body {
 .signal-level-value.entry { color: var(--accent-teal); }
 .signal-level-value.sl { color: var(--accent-red); }
 .signal-level-value.tp { color: var(--accent-green); }
+
+/* Exit signal PnL */
+.signal-pnl {
+  display: flex;
+  gap: 12px;
+  margin: 8px 0;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.signal-pnl-label { color: var(--text-muted); }
+.signal-pnl-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
 
 .signal-breakdown {
   margin-top: 8px;
@@ -344,7 +453,7 @@ html, body {
   display: flex;
   gap: 4px;
 }
-.reason-item::before { content: "→"; color: var(--text-muted); }
+.reason-item::before { content: "\2192"; color: var(--text-muted); }
 
 .signal-time {
   font-size: 10px;
@@ -374,6 +483,90 @@ html, body {
   letter-spacing: 0.5px;
   color: var(--text-muted);
   margin-bottom: 8px;
+}
+
+/* ── Order Flow Panel (NEW) ── */
+.of-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.of-metric {
+  padding: 4px 6px;
+  background: var(--bg-card);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.of-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.of-value {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.of-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Buy/Sell volume bar */
+.of-vol-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.of-vol-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 55px;
+}
+.of-vol-label:last-child { text-align: right; }
+.of-vol-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  display: flex;
+  overflow: hidden;
+}
+.of-vol-buy { background: var(--accent-green); height: 100%; transition: width 0.3s; }
+.of-vol-sell { background: var(--accent-red); height: 100%; transition: width 0.3s; }
+
+/* Order Book delta bar (also used in OF panel now) */
+.ob-delta-bar {
+  height: 22px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.ob-delta-bid {
+  height: 100%;
+  background: var(--accent-green-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-green);
+}
+.ob-delta-ask {
+  height: 100%;
+  background: var(--accent-red-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-red);
 }
 
 /* Fear & Greed Gauge */
@@ -429,56 +622,6 @@ html, body {
   font-family: var(--font-mono);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-}
-
-/* Order Book Mini */
-.ob-row {
-  display: flex;
-  gap: 2px;
-  margin: 2px 0;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-.ob-bar {
-  height: 16px;
-  border-radius: 2px;
-  transition: width 0.3s;
-  display: flex;
-  align-items: center;
-  padding: 0 4px;
-  font-size: 10px;
-  color: rgba(255,255,255,0.8);
-}
-.ob-bar.bid { background: var(--accent-green-dim); justify-content: flex-end; }
-.ob-bar.ask { background: var(--accent-red-dim); }
-.ob-delta-bar {
-  height: 24px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  margin-top: 8px;
-  overflow: hidden;
-}
-.ob-delta-bid {
-  height: 100%;
-  background: var(--accent-green-dim);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent-green);
-}
-.ob-delta-ask {
-  height: 100%;
-  background: var(--accent-red-dim);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent-red);
 }
 
 /* Macro */
@@ -585,6 +728,11 @@ html, body {
   outline: none;
   border-color: var(--accent-teal);
 }
+.settings-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
 
 .btn-save {
   width: 100%;
@@ -630,8 +778,11 @@ html, body {
 .text-red { color: var(--accent-red); }
 .text-yellow { color: var(--accent-yellow); }
 .text-teal { color: var(--accent-teal); }
+.text-purple { color: var(--accent-purple); }
 .text-muted { color: var(--text-muted); }
 .text-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.hidden { display: none !important; }
 
 .sr-only {
   position: absolute;
@@ -674,11 +825,12 @@ html, body {
     grid-template-rows: auto auto 1fr auto auto;
   }
   .signal-panel { border-left: none; border-top: 1px solid var(--border); max-height: 250px; }
-  .bottom-panel { grid-template-columns: repeat(2, 1fr); max-height: 300px; }
+  .bottom-panel { grid-template-columns: repeat(2, 1fr); max-height: 320px; }
 }
 @media (max-width: 600px) {
   .bottom-panel { grid-template-columns: 1fr; }
   .header { flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
   .price-value { font-size: 18px; }
   .gauge-score { font-size: 22px; }
+  .of-grid { grid-template-columns: repeat(2, 1fr); }
 }

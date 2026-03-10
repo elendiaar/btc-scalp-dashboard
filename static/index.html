@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BTC Scalp Dashboard</title>
+  <title>BTC Scalp Dashboard v2</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -13,7 +13,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
 <body>
-  <!-- ── Dashboard Grid ── -->
   <div class="dashboard">
 
     <!-- ── Header ── -->
@@ -27,7 +26,7 @@
           <line x1="10" y1="18" x2="10" y2="20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           <line x1="13" y1="18" x2="13" y2="20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
-        BTC Scalp
+        BTC Scalp <span class="version-tag">v2</span>
       </div>
 
       <div class="price-block">
@@ -35,9 +34,15 @@
         <span class="price-change" id="price-change">0.00%</span>
       </div>
 
-      <div class="conn-status">
+      <div class="ws-status-group">
         <span class="conn-dot disconnected" id="conn-dot"></span>
         <span id="conn-text">Connecting...</span>
+        <div class="ws-stream-indicators" id="ws-indicators">
+          <span class="ws-indicator off" id="ws-trades" title="Trade stream">T</span>
+          <span class="ws-indicator off" id="ws-depth" title="Depth stream">D</span>
+          <span class="ws-indicator off" id="ws-kline1m" title="1m Kline stream">1m</span>
+          <span class="ws-indicator off" id="ws-kline5m" title="5m Kline stream">5m</span>
+        </div>
       </div>
 
       <div class="confluence-gauge">
@@ -63,7 +68,7 @@
 
     <!-- ── Market Condition Banner ── -->
     <div class="market-banner ranging" id="market-banner">
-      <span id="banner-icon">◆</span> Market Condition: <span id="market-condition">Ranging</span>
+      <span id="banner-icon">&#9670;</span> Market Condition: <span id="market-condition">Ranging</span>
       <span id="banner-extra"></span>
     </div>
 
@@ -75,7 +80,8 @@
         <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">
           RSI <span id="toolbar-rsi" class="text-mono">--</span> |
           MACD <span id="toolbar-macd" class="text-mono">--</span> |
-          ADX <span id="toolbar-adx" class="text-mono">--</span>
+          ADX <span id="toolbar-adx" class="text-mono">--</span> |
+          ATR <span id="toolbar-atr" class="text-mono">--</span>
         </span>
       </div>
       <div class="chart-container">
@@ -83,12 +89,26 @@
       </div>
     </main>
 
-    <!-- ── Signal Panel ── -->
+    <!-- ── Signal Panel (right sidebar) ── -->
     <aside class="signal-panel" role="complementary">
       <div class="panel-header">
         Signals
         <span id="signal-count" style="float:right;font-weight:400;color:var(--text-muted)"></span>
       </div>
+
+      <!-- Active Position Banner -->
+      <div class="active-position hidden" id="active-position">
+        <div class="active-pos-header">
+          <span class="active-pos-dir" id="active-pos-dir">--</span>
+          <span class="active-pos-pnl" id="active-pos-pnl">--</span>
+        </div>
+        <div class="active-pos-details">
+          <span>Entry: <span id="active-pos-entry" class="text-mono">--</span></span>
+          <span>SL: <span id="active-pos-sl" class="text-mono">--</span></span>
+          <span>TP1: <span id="active-pos-tp" class="text-mono">--</span></span>
+        </div>
+      </div>
+
       <div id="signal-feed">
         <div class="no-signals">Waiting for data...</div>
       </div>
@@ -96,6 +116,56 @@
 
     <!-- ── Bottom Panel ── -->
     <div class="bottom-panel">
+
+      <!-- Order Flow Panel (NEW) -->
+      <div class="bottom-section">
+        <div class="bottom-section-title">Order Flow</div>
+        <div class="of-grid">
+          <div class="of-metric">
+            <span class="of-label">CVD</span>
+            <span class="of-value text-mono" id="of-cvd">0.00</span>
+            <span class="of-sub" id="of-cvd-trend">flat</span>
+          </div>
+          <div class="of-metric">
+            <span class="of-label">LOB Ratio</span>
+            <span class="of-value text-mono" id="of-lob">1.00</span>
+            <span class="of-sub" id="of-lob-imb">0.0%</span>
+          </div>
+          <div class="of-metric">
+            <span class="of-label">Tape</span>
+            <span class="of-value" id="of-tape">balanced</span>
+          </div>
+          <div class="of-metric">
+            <span class="of-label">Absorption</span>
+            <span class="of-value" id="of-absorption">none</span>
+          </div>
+          <div class="of-metric">
+            <span class="of-label">Spread</span>
+            <span class="of-value text-mono" id="of-spread">$0.00</span>
+            <span class="of-sub" id="of-spread-pct">0.000%</span>
+          </div>
+          <div class="of-metric">
+            <span class="of-label">CVD Divergence</span>
+            <span class="of-value" id="of-cvd-div">none</span>
+          </div>
+        </div>
+        <!-- Buy/Sell Volume Bar -->
+        <div class="of-vol-bar-wrap">
+          <div class="of-vol-label">Buy <span class="text-mono" id="of-buy-vol">0.00</span></div>
+          <div class="of-vol-bar">
+            <div class="of-vol-buy" id="of-vol-buy-bar" style="width:50%"></div>
+            <div class="of-vol-sell" id="of-vol-sell-bar" style="width:50%"></div>
+          </div>
+          <div class="of-vol-label">Sell <span class="text-mono" id="of-sell-vol">0.00</span></div>
+        </div>
+        <!-- OB Delta -->
+        <div class="ob-delta-bar" id="ob-delta-bar" style="margin-top:6px">
+          <div class="ob-delta-bid" id="ob-bid-bar" style="width:50%">Bids 50%</div>
+          <div class="ob-delta-ask" id="ob-ask-bar" style="width:50%">Asks 50%</div>
+        </div>
+        <div style="margin-top:4px;font-size:11px;color:var(--text-muted)">Delta: <span id="ob-delta-val" class="text-mono">0.00</span></div>
+      </div>
+
       <!-- Fear & Greed -->
       <div class="bottom-section">
         <div class="bottom-section-title">Fear & Greed Index</div>
@@ -127,19 +197,6 @@
         </div>
       </div>
 
-      <!-- Order Book Delta -->
-      <div class="bottom-section">
-        <div class="bottom-section-title">Order Flow</div>
-        <div id="orderbook-visual">
-          <div class="ob-delta-bar" id="ob-delta-bar">
-            <div class="ob-delta-bid" id="ob-bid-bar" style="width:50%">Bids 50%</div>
-            <div class="ob-delta-ask" id="ob-ask-bar" style="width:50%">Asks 50%</div>
-          </div>
-          <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">Delta: <span id="ob-delta-val" class="text-mono">0.00</span></div>
-          <div id="ob-levels" style="margin-top:6px"></div>
-        </div>
-      </div>
-
       <!-- Macro -->
       <div class="bottom-section">
         <div class="bottom-section-title">Macro Context</div>
@@ -158,7 +215,7 @@
           </div>
         </div>
         <div style="margin-top:8px;font-size:10px;color:var(--text-faint)">
-          Sources: Binance Futures, Alternative.me, Yahoo Finance
+          Sources: Binance, Alternative.me, Yahoo Finance, CoinGecko
         </div>
       </div>
     </div>
@@ -174,11 +231,12 @@
       <div class="modal-body">
         <div class="settings-group">
           <div class="settings-group-title">Confluence Weights</div>
-          <div class="settings-row"><span class="settings-label">Technical</span><input class="settings-input" id="s-w-tech" type="number" step="0.05" min="0" max="1" value="0.40"></div>
-          <div class="settings-row"><span class="settings-label">Order Flow</span><input class="settings-input" id="s-w-flow" type="number" step="0.05" min="0" max="1" value="0.20"></div>
-          <div class="settings-row"><span class="settings-label">On-Chain</span><input class="settings-input" id="s-w-chain" type="number" step="0.05" min="0" max="1" value="0.15"></div>
-          <div class="settings-row"><span class="settings-label">Sentiment</span><input class="settings-input" id="s-w-sent" type="number" step="0.05" min="0" max="1" value="0.15"></div>
-          <div class="settings-row"><span class="settings-label">Macro</span><input class="settings-input" id="s-w-macro" type="number" step="0.05" min="0" max="1" value="0.10"></div>
+          <div class="settings-row"><span class="settings-label">Order Flow</span><input class="settings-input" id="s-w-flow" type="number" step="0.05" min="0" max="1" value="0.45"></div>
+          <div class="settings-row"><span class="settings-label">Technical</span><input class="settings-input" id="s-w-tech" type="number" step="0.05" min="0" max="1" value="0.20"></div>
+          <div class="settings-row"><span class="settings-label">Derivatives</span><input class="settings-input" id="s-w-deriv" type="number" step="0.05" min="0" max="1" value="0.15"></div>
+          <div class="settings-row"><span class="settings-label">Sentiment</span><input class="settings-input" id="s-w-sent" type="number" step="0.05" min="0" max="1" value="0.05"></div>
+          <div class="settings-row"><span class="settings-label">Macro</span><input class="settings-input" id="s-w-macro" type="number" step="0.05" min="0" max="1" value="0.15"></div>
+          <div class="settings-hint">Must sum to 1.0 — <span id="s-w-sum" class="text-mono">1.00</span></div>
         </div>
         <div class="settings-group">
           <div class="settings-group-title">RSI Settings</div>
@@ -204,6 +262,11 @@
           <div class="settings-row"><span class="settings-label">Primary R:R</span><input class="settings-input" id="s-rr1" type="number" step="0.5" min="1" max="10" value="2.0"></div>
           <div class="settings-row"><span class="settings-label">Secondary R:R</span><input class="settings-input" id="s-rr2" type="number" step="0.5" min="1" max="10" value="3.0"></div>
         </div>
+        <div class="settings-group">
+          <div class="settings-group-title">Transaction Costs</div>
+          <div class="settings-row"><span class="settings-label">Fee Rate</span><input class="settings-input" id="s-fee" type="number" step="0.0001" min="0" max="0.01" value="0.001"></div>
+          <div class="settings-row"><span class="settings-label">Slippage Rate</span><input class="settings-input" id="s-slip" type="number" step="0.0001" min="0" max="0.01" value="0.0005"></div>
+        </div>
         <button class="btn-save" id="save-settings">Save Settings</button>
       </div>
     </div>
@@ -211,7 +274,7 @@
 
   <!-- ── Signal Log Modal ── -->
   <div class="modal-overlay" id="log-modal">
-    <div class="modal" style="width:700px" role="dialog" aria-label="Signal log">
+    <div class="modal" style="width:780px" role="dialog" aria-label="Signal log">
       <div class="modal-header">
         Signal Log
         <button class="modal-close" id="close-log" aria-label="Close log">&times;</button>
@@ -219,7 +282,7 @@
       <div class="modal-body" style="max-height:60vh;overflow-y:auto;padding:0">
         <table class="log-table">
           <thead>
-            <tr><th>Time</th><th>Dir</th><th>Score</th><th>Conf</th><th>Entry</th><th>SL</th><th>TP1</th><th>Condition</th></tr>
+            <tr><th>Time</th><th>Type</th><th>Dir</th><th>Score</th><th>Conf</th><th>Entry</th><th>SL</th><th>TP1</th><th>OF</th><th>Cond</th></tr>
           </thead>
           <tbody id="log-tbody"></tbody>
         </table>

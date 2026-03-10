@@ -9,3 +9,5 @@ dist/
 build/
 .DS_Store
 node_modules/
+backtest_results.csv
+backtest_results.md
